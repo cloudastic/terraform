@@ -1,0 +1,132 @@
+name: 'Terraform CI/CD'
+
+on:
+  push:
+    branches:
+      - master # Triggers on push to the master branch
+
+env:
+  TF_DEV_WORKING_DIR: './terraform/envs/dev' # Adjusted paths for Linux/GitHub Actions runner
+  ARM_SUBSCRIPTION_ID: '56fbbfce-6dab-4d62-af16-ccd107f4d9d3'
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }} # Use GitHub Secrets for Tenant ID
+
+jobs:
+
+  # 1. Validate Stage (CI)
+  validate:
+    name: 'Terraform Validate & Init'
+    runs-on: ubuntu-latest
+    
+    # Permissions required for OIDC login
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 'latest' # Uses the equivalent of TerraformInstaller task
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }} 
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }} # Use env variable
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }}
+        
+      # The 'script' step with ls commands is replaced by a simple list command
+      - name: Debug Working Directory
+        run: ls -lR
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }}
+
+
+  # 2. Plan Stage (CI)
+  plan:
+    name: 'Terraform Plan'
+    needs: validate # Depends on Validate job
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }} 
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }}
+        
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }}
+        # Optional: Save plan output for review/use in apply step
+        # run: terraform plan -out=tfplan.out
+
+
+  # 3. Apply Stage (CD - Requires Approval)
+  apply:
+    name: 'Terraform Apply'
+    needs: plan # Depends on Plan job
+    runs-on: ubuntu-latest
+    
+    # Replaces the Azure DevOps 'environment' gate for manual approval
+    environment: 
+      name: production # This must be configured in your GitHub repo settings for manual approval
+      # url: (Optional: URL to the deployed resource)
+
+    # Only run apply if the push is to the 'master' branch
+    if: github.ref == 'refs/heads/master'
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }} 
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }}
+        
+      # Conditional Apply logic is simplified using the 'if' condition on the entire job
+      - name: Terraform Apply
+        run: terraform apply -auto-approve 
+        working-directory: ${{ env.TF_DEV_WORKING_DIR }}
