@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master # Triggers on push to the master branch
+  workflow_dispatch:
 
 env:
   TF_DEV_WORKING_DIR: './terraform/envs/dev' # Adjusted paths for Linux/GitHub Actions runner
